@@ -300,16 +300,36 @@
         <div id="ratingDesc" class="rating-desc">★★★★☆ (充実・集中できた: ×1.5)</div>
       </div>
 
-      <!-- Realtime Points Preview Box -->
-      <div class="points-preview-box">
-        <div>
-          <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:2px;">🚀 獲得成長ポイント</div>
-          <div id="previewGrowthVal" class="preview-val preview-growth">+0</div>
+      <!-- Realtime Points Preview Box (手動調整可能) -->
+      <div class="points-preview-box" style="padding: 16px; flex-direction: column; gap: 10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; width:100%; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:8px;">
+          <span style="font-size:0.8rem; font-weight:700; color:var(--text-main);">獲得ポイント換算（直接変更可能）</span>
+          <button type="button" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:0.72rem;" onclick="app.recalculateModalPoints(true)" title="自動計算値に戻す">
+            🔄 自動計算に戻す
+          </button>
         </div>
-        <div style="border-left:1px solid rgba(255,255,255,0.1); margin: 0 10px;"></div>
-        <div>
-          <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:2px;">✨ 獲得幸福度ポイント</div>
-          <div id="previewHappinessVal" class="preview-val preview-happiness">+0</div>
+        <div style="display:flex; justify-content:space-around; align-items:center; width:100%;">
+          <div style="text-align:center; flex:1;">
+            <label class="form-label" style="font-size:0.75rem; color:#c4b5fd; margin-bottom:4px;">🚀 成長ポイント</label>
+            <div style="display:flex; align-items:center; justify-content:center; gap:4px;">
+              <span style="font-size:1.1rem; font-weight:700; color:#c4b5fd;">+</span>
+              <input type="number" id="previewGrowthInput" class="form-input" 
+                     style="width:95px; text-align:center; font-size:1.3rem; font-weight:800; color:#c4b5fd; padding:4px 8px; border-color:rgba(139,92,246,0.4);" 
+                     step="0.5" min="0" value="0">
+              <span style="font-size:0.8rem; color:var(--text-muted);">pt</span>
+            </div>
+          </div>
+          <div style="border-left:1px solid rgba(255,255,255,0.1); height:40px; margin: 0 10px;"></div>
+          <div style="text-align:center; flex:1;">
+            <label class="form-label" style="font-size:0.75rem; color:#6ee7b7; margin-bottom:4px;">✨ 幸福度ポイント</label>
+            <div style="display:flex; align-items:center; justify-content:center; gap:4px;">
+              <span style="font-size:1.1rem; font-weight:700; color:#6ee7b7;">+</span>
+              <input type="number" id="previewHappinessInput" class="form-input" 
+                     style="width:95px; text-align:center; font-size:1.3rem; font-weight:800; color:#6ee7b7; padding:4px 8px; border-color:rgba(16,185,129,0.4);" 
+                     step="0.5" min="0" value="0">
+              <span style="font-size:0.8rem; color:var(--text-muted);">pt</span>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -532,7 +532,7 @@ class LifeRoiApp {
     document.getElementById("ratingDesc").innerText = descMap[this.selectedRating];
   }
 
-  recalculateModalPoints() {
+  recalculateModalPoints(forceReset = false) {
     const catId = document.getElementById("logCategorySelect").value;
     const minutes = parseFloat(document.getElementById("logMinutesInput").value) || 0;
     const cat = this.categories.find(c => c.id === catId);
@@ -540,11 +540,22 @@ class LifeRoiApp {
 
     const multiplier = RATING_MULTIPLIERS[this.selectedRating] || 1.0;
     const hours = minutes / 60;
-    const happinessPts = Math.round(hours * cat.happinessRate * multiplier * 10) / 10;
-    const growthPts = Math.round(hours * cat.growthRate * multiplier * 10) / 10;
+    const calcHappiness = Math.round(hours * cat.happinessRate * multiplier * 10) / 10;
+    const calcGrowth = Math.round(hours * cat.growthRate * multiplier * 10) / 10;
 
-    document.getElementById("previewHappinessVal").innerText = `+${happinessPts}`;
-    document.getElementById("previewGrowthVal").innerText = `+${growthPts}`;
+    const growthInput = document.getElementById("previewGrowthInput");
+    const happinessInput = document.getElementById("previewHappinessInput");
+
+    if (growthInput) {
+      growthInput.value = calcGrowth;
+    }
+    if (happinessInput) {
+      happinessInput.value = calcHappiness;
+    }
+
+    if (forceReset) {
+      this.showToast("ポイントを自動計算値にリセットしました 🔄");
+    }
   }
 
   saveLogFromModal() {
@@ -561,8 +572,15 @@ class LifeRoiApp {
     const cat = this.categories.find(c => c.id === catId);
     const multiplier = RATING_MULTIPLIERS[this.selectedRating] || 1.0;
     const hours = minutes / 60;
-    const happinessPoints = Math.round(hours * cat.happinessRate * multiplier * 10) / 10;
-    const growthPoints = Math.round(hours * cat.growthRate * multiplier * 10) / 10;
+    const defaultHappiness = Math.round(hours * cat.happinessRate * multiplier * 10) / 10;
+    const defaultGrowth = Math.round(hours * cat.growthRate * multiplier * 10) / 10;
+
+    // 手動入力値を取得（無効値なら自動計算値を採用）
+    const inputGrowthVal = parseFloat(document.getElementById("previewGrowthInput")?.value);
+    const inputHappinessVal = parseFloat(document.getElementById("previewHappinessInput")?.value);
+
+    const growthPoints = !isNaN(inputGrowthVal) && inputGrowthVal >= 0 ? Math.round(inputGrowthVal * 10) / 10 : defaultGrowth;
+    const happinessPoints = !isNaN(inputHappinessVal) && inputHappinessVal >= 0 ? Math.round(inputHappinessVal * 10) / 10 : defaultHappiness;
 
     const newLog = {
       id: "log_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
