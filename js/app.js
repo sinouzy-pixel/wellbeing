@@ -1,0 +1,677 @@
+/**
+ * Life ROI Tracker - メインロジック & UIコントローラー
+ */
+
+class LifeRoiApp {
+  constructor() {
+    this.categories = [];
+    this.logs = [];
+    this.activeTimer = null;
+    this.timerInterval = null;
+    this.currentPeriod = "7d"; // 'today', '7d', '30d', 'all'
+    this.matrixXAxis = "time";
+    this.matrixYAxis = "total";
+    this.chartManager = new ChartManager();
+
+    // モーダル一時状態
+    this.pendingCompletion = null;
+    this.selectedRating = 4;
+
+    this.init();
+  }
+
+  init() {
+    this.loadData();
+    this.bindEvents();
+    this.renderAll();
+    this.checkPersistedTimer();
+  }
+
+  // =========================================================================
+  // データの永続化 & 初期化
+  // =========================================================================
+  loadData() {
+    // カテゴリ読み込み
+    const savedCats = localStorage.getItem("liferoi_categories");
+    if (savedCats) {
+      try {
+        this.categories = JSON.parse(savedCats);
+      } catch (e) {
+        this.categories = [...DEFAULT_CATEGORIES];
+      }
+    } else {
+      this.categories = [...DEFAULT_CATEGORIES];
+      this.saveCategories();
+    }
+
+    // ログ読み込み
+    const savedLogs = localStorage.getItem("liferoi_logs");
+    if (savedLogs) {
+      try {
+        this.logs = JSON.parse(savedLogs);
+      } catch (e) {
+        this.logs = generateSampleLogs();
+        this.saveLogs();
+      }
+    } else {
+      // 初回はサンプルデータ投入
+      this.logs = generateSampleLogs();
+      this.saveLogs();
+    }
+  }
+
+  saveCategories() {
+    localStorage.setItem("liferoi_categories", JSON.stringify(this.categories));
+  }
+
+  saveLogs() {
+    localStorage.setItem("liferoi_logs", JSON.stringify(this.logs));
+  }
+
+  resetToSampleData() {
+    if (confirm("サンプルデータを再読み込みしますか？現在の記録はサンプルデータで置き換えられます。")) {
+      this.categories = [...DEFAULT_CATEGORIES];
+      this.logs = generateSampleLogs();
+      this.saveCategories();
+      this.saveLogs();
+      this.renderAll();
+      this.showToast("サンプルデータを再読み込みしました ✨");
+    }
+  }
+
+  clearAllData() {
+    if (confirm("すべての行動記録を削除しますか？この操作は取り消せません。")) {
+      this.logs = [];
+      this.saveLogs();
+      this.renderAll();
+      this.showToast("すべての記録をクリアしました");
+    }
+  }
+
+  // =========================================================================
+  // タイマー機能 (ワンタップ計測)
+  // =========================================================================
+  startTimer(categoryId) {
+    if (this.activeTimer) {
+      if (this.activeTimer.categoryId === categoryId) {
+        // 同じカテゴリを再度タップした場合は完了モーダルへ
+        this.promptCompleteTimer();
+        return;
+      }
+      if (!confirm("別のタイマーが稼働中です。現在のタイマーを終了して新しい活動を開始しますか？")) {
+        return;
+      }
+      this.stopTimerInternal(false);
+    }
+
+    const cat = this.categories.find(c => c.id === categoryId);
+    if (!cat) return;
+
+    this.activeTimer = {
+      categoryId: cat.id,
+      categoryName: cat.name,
+      categoryIcon: cat.icon,
+      startTime: Date.now(),
+      elapsedSeconds: 0,
+      isPaused: false,
+      lastTick: Date.now()
+    };
+
+    localStorage.setItem("liferoi_active_timer", JSON.stringify(this.activeTimer));
+    this.startTimerTicker();
+    this.updateTimerUI();
+    this.renderActivityCards();
+    this.showToast(`「${cat.name}」の計測を開始しました ⏱`);
+  }
+
+  startTimerTicker() {
+    clearInterval(this.timerInterval);
+    this.timerInterval = setInterval(() => {
+      if (!this.activeTimer || this.activeTimer.isPaused) return;
+
+      const now = Date.now();
+      const deltaSec = Math.floor((now - this.activeTimer.lastTick) / 1000);
+      if (deltaSec >= 1) {
+        this.activeTimer.elapsedSeconds += deltaSec;
+        this.activeTimer.lastTick = now;
+        this.updateTimerDisplay();
+        // 定期的に状態保存
+        if (this.activeTimer.elapsedSeconds % 10 === 0) {
+          localStorage.setItem("liferoi_active_timer", JSON.stringify(this.activeTimer));
+        }
+      }
+    }, 500);
+  }
+
+  togglePauseTimer() {
+    if (!this.activeTimer) return;
+    this.activeTimer.isPaused = !this.activeTimer.isPaused;
+    if (!this.activeTimer.isPaused) {
+      this.activeTimer.lastTick = Date.now();
+    }
+    localStorage.setItem("liferoi_active_timer", JSON.stringify(this.activeTimer));
+    this.updateTimerUI();
+  }
+
+  promptCompleteTimer() {
+    if (!this.activeTimer) return;
+    const cat = this.categories.find(c => c.id === this.activeTimer.categoryId);
+    const elapsedMinutes = Math.max(1, Math.round(this.activeTimer.elapsedSeconds / 60));
+
+    this.openLogModal({
+      categoryId: cat.id,
+      title: cat.name,
+      durationMinutes: elapsedMinutes,
+      cost: cat.defaultCost || 0,
+      rating: 4,
+      note: ""
+    }, true);
+  }
+
+  cancelTimer() {
+    if (confirm("現在の計測を破棄しますか？")) {
+      this.stopTimerInternal(false);
+      this.showToast("タイマーをキャンセルしました");
+    }
+  }
+
+  stopTimerInternal(saveActiveState = false) {
+    clearInterval(this.timerInterval);
+    this.activeTimer = null;
+    localStorage.removeItem("liferoi_active_timer");
+    this.updateTimerUI();
+    this.renderActivityCards();
+  }
+
+  checkPersistedTimer() {
+    const saved = localStorage.getItem("liferoi_active_timer");
+    if (saved) {
+      try {
+        this.activeTimer = JSON.parse(saved);
+        if (!this.activeTimer.isPaused) {
+          const now = Date.now();
+          const extra = Math.floor((now - this.activeTimer.lastTick) / 1000);
+          this.activeTimer.elapsedSeconds += Math.max(0, extra);
+          this.activeTimer.lastTick = now;
+        }
+        this.startTimerTicker();
+        this.updateTimerUI();
+        this.renderActivityCards();
+      } catch (e) {
+        localStorage.removeItem("liferoi_active_timer");
+      }
+    }
+  }
+
+  updateTimerUI() {
+    const banner = document.getElementById("activeTimerBar");
+    if (!this.activeTimer) {
+      banner.classList.remove("running");
+      banner.style.display = "none";
+      return;
+    }
+
+    banner.classList.add("running");
+    banner.style.display = "flex";
+
+    const cat = this.categories.find(c => c.id === this.activeTimer.categoryId);
+    document.getElementById("timerCategoryTitle").innerHTML = `${cat.icon} ${cat.name}`;
+    document.getElementById("timerRatesBadge").innerHTML = `
+      <span>🚀 成長: +${cat.growthRate}pt/h</span>
+      <span>✨ 幸福: +${cat.happinessRate}pt/h</span>
+    `;
+
+    const pauseBtn = document.getElementById("timerPauseBtn");
+    pauseBtn.innerHTML = this.activeTimer.isPaused ? "▶ 再開" : "⏸ 一時停止";
+
+    this.updateTimerDisplay();
+  }
+
+  updateTimerDisplay() {
+    if (!this.activeTimer) return;
+    const totalSec = this.activeTimer.elapsedSeconds;
+    const hrs = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+    const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+    const secs = String(totalSec % 60).padStart(2, "0");
+    document.getElementById("timerDisplay").innerText = `${hrs}:${mins}:${secs}`;
+  }
+
+  // =========================================================================
+  // 記録 & ポイント計算モーダル
+  // =========================================================================
+  openLogModal(initialData = {}, isFromActiveTimer = false) {
+    const targetCatId = initialData.categoryId || (this.categories[0] ? this.categories[0].id : "");
+    this.pendingCompletion = {
+      ...initialData,
+      categoryId: targetCatId,
+      isFromActiveTimer
+    };
+    this.selectedRating = initialData.rating || 4;
+
+    const modal = document.getElementById("logModal");
+    const catSelect = document.getElementById("logCategorySelect");
+
+    // カテゴリオプション生成
+    catSelect.innerHTML = this.categories.map(c => `
+      <option value="${c.id}" ${c.id === targetCatId ? "selected" : ""}>
+        ${c.icon} ${c.name}
+      </option>
+    `).join("");
+
+    document.getElementById("logMinutesInput").value = initialData.durationMinutes || 30;
+    document.getElementById("logCostInput").value = initialData.cost !== undefined ? initialData.cost : 0;
+    document.getElementById("logNoteInput").value = initialData.note || "";
+
+    this.updateRatingStarsUI();
+    this.recalculateModalPoints();
+
+    modal.classList.add("open");
+  }
+
+  closeLogModal() {
+    document.getElementById("logModal").classList.remove("open");
+    this.pendingCompletion = null;
+  }
+
+  setRating(rating) {
+    this.selectedRating = rating;
+    this.updateRatingStarsUI();
+    this.recalculateModalPoints();
+  }
+
+  updateRatingStarsUI() {
+    const buttons = document.querySelectorAll(".rating-star-btn");
+    buttons.forEach(btn => {
+      const r = parseInt(btn.dataset.rating, 10);
+      btn.classList.toggle("selected", r === this.selectedRating);
+    });
+
+    const descMap = {
+      1: "★☆☆☆☆ (充実度低め・気分乗らず: ×0.65)",
+      2: "★★☆☆☆ (やや不完全燃焼: ×0.85)",
+      3: "★★★☆☆ (標準的・日常通り: ×1.0)",
+      4: "★★★★☆ (良い時間・満足: ×1.2)",
+      5: "★★★★★ (最高！超充実 & 成長実感: ×1.45)"
+    };
+    document.getElementById("ratingDesc").innerText = descMap[this.selectedRating];
+  }
+
+  recalculateModalPoints() {
+    const catId = document.getElementById("logCategorySelect").value;
+    const minutes = parseFloat(document.getElementById("logMinutesInput").value) || 0;
+    const cat = this.categories.find(c => c.id === catId);
+    if (!cat) return;
+
+    const multiplier = RATING_MULTIPLIERS[this.selectedRating] || 1.0;
+    const hours = minutes / 60;
+    const happinessPts = Math.round(hours * cat.happinessRate * multiplier * 10) / 10;
+    const growthPts = Math.round(hours * cat.growthRate * multiplier * 10) / 10;
+
+    document.getElementById("previewHappinessVal").innerText = `+${happinessPts}`;
+    document.getElementById("previewGrowthVal").innerText = `+${growthPts}`;
+  }
+
+  saveLogFromModal() {
+    const catId = document.getElementById("logCategorySelect").value;
+    const minutes = parseInt(document.getElementById("logMinutesInput").value, 10) || 0;
+    const cost = parseInt(document.getElementById("logCostInput").value, 10) || 0;
+    const note = document.getElementById("logNoteInput").value.trim();
+
+    if (minutes <= 0) {
+      alert("時間は1分以上を入力してください。");
+      return;
+    }
+
+    const cat = this.categories.find(c => c.id === catId);
+    const multiplier = RATING_MULTIPLIERS[this.selectedRating] || 1.0;
+    const hours = minutes / 60;
+    const happinessPoints = Math.round(hours * cat.happinessRate * multiplier * 10) / 10;
+    const growthPoints = Math.round(hours * cat.growthRate * multiplier * 10) / 10;
+
+    const newLog = {
+      id: "log_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
+      categoryId: cat.id,
+      title: cat.name,
+      durationMinutes: minutes,
+      cost,
+      rating: this.selectedRating,
+      happinessPoints,
+      growthPoints,
+      timestamp: new Date().toISOString(),
+      note
+    };
+
+    this.logs.unshift(newLog);
+    this.saveLogs();
+
+    if (this.pendingCompletion && this.pendingCompletion.isFromActiveTimer) {
+      this.stopTimerInternal(false);
+    }
+
+    this.closeLogModal();
+    this.renderAll();
+    this.showToast(`✨ ${cat.name}を記録しました！ (+${happinessPoints}幸福 / +${growthPoints}成長)`);
+  }
+
+  deleteLog(logId) {
+    if (confirm("この記録を削除しますか？")) {
+      this.logs = this.logs.filter(l => l.id !== logId);
+      this.saveLogs();
+      this.renderAll();
+      this.showToast("記録を削除しました");
+    }
+  }
+
+  // =========================================================================
+  // フィルタリング & KPI集計
+  // =========================================================================
+  getFilteredLogs() {
+    if (this.currentPeriod === "all") return this.logs;
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+    let thresholdTime = 0;
+    if (this.currentPeriod === "today") {
+      thresholdTime = startOfToday;
+    } else if (this.currentPeriod === "7d") {
+      thresholdTime = startOfToday - (6 * 24 * 60 * 60 * 1000);
+    } else if (this.currentPeriod === "30d") {
+      thresholdTime = startOfToday - (29 * 24 * 60 * 60 * 1000);
+    }
+
+    return this.logs.filter(l => new Date(l.timestamp).getTime() >= thresholdTime);
+  }
+
+  renderKPIs(filteredLogs) {
+    let totalMinutes = 0;
+    let totalCost = 0;
+    let totalHappiness = 0;
+    let totalGrowth = 0;
+
+    filteredLogs.forEach(log => {
+      totalMinutes += log.durationMinutes || 0;
+      totalCost += log.cost || 0;
+      totalHappiness += log.happinessPoints || 0;
+      totalGrowth += log.growthPoints || 0;
+    });
+
+    const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
+    const totalPoints = Math.round((totalHappiness + totalGrowth) * 10) / 10;
+
+    // ROI 計算: 1時間あたり総合pt & 1000円あたり総合pt
+    const timeROI = totalHours > 0 ? (totalPoints / totalHours).toFixed(1) : "0.0";
+    const costROI = totalCost > 0 ? ((totalPoints / totalCost) * 1000).toFixed(1) : "—";
+
+    document.getElementById("kpiTotalTime").innerText = `${totalHours}h`;
+    document.getElementById("kpiTotalTimeSub").innerText = `${totalMinutes}分 投資`;
+
+    document.getElementById("kpiTotalCost").innerText = `¥${totalCost.toLocaleString()}`;
+    document.getElementById("kpiTotalCostSub").innerText = `自己投資支出`;
+
+    document.getElementById("kpiGrowthPt").innerText = `+${Math.round(totalGrowth)}`;
+    document.getElementById("kpiGrowthPtSub").innerText = `スキル・自己研鑽`;
+
+    document.getElementById("kpiHappinessPt").innerText = `+${Math.round(totalHappiness)}`;
+    document.getElementById("kpiHappinessPtSub").innerText = `心の充足・リフレッシュ`;
+
+    document.getElementById("kpiRoiScore").innerText = `${timeROI} pt/h`;
+    document.getElementById("kpiRoiSub").innerText = totalCost > 0 ? `費用対: ${costROI} pt/1千円` : `時間効率最重視`;
+  }
+
+  // =========================================================================
+  // UIレンダリング
+  // =========================================================================
+  renderAll() {
+    const filteredLogs = this.getFilteredLogs();
+    this.renderKPIs(filteredLogs);
+    this.renderActivityCards();
+    this.renderCharts(filteredLogs);
+    this.renderLogsList(filteredLogs);
+  }
+
+  renderActivityCards() {
+    const container = document.getElementById("activityGrid");
+    if (!container) return;
+
+    container.innerHTML = this.categories.map(cat => {
+      const isActive = this.activeTimer && this.activeTimer.categoryId === cat.id;
+      return `
+        <div class="activity-card ${isActive ? "is-active" : ""}" 
+             style="--cat-color: ${cat.color}" 
+             onclick="app.startTimer('${cat.id}')">
+          <div class="activity-top">
+            <div class="activity-icon-wrap" style="color: ${cat.color}">${cat.icon}</div>
+            <button class="activity-quick-btn" title="ワンタップで計測">
+              ${isActive ? "計測中..." : "▶ タップで計測"}
+            </button>
+          </div>
+          <div class="activity-title">${cat.name}</div>
+          <div class="activity-desc">${cat.description || ""}</div>
+          <div class="activity-rates">
+            <span class="rate-badge rate-growth">🚀 +${cat.growthRate}pt/h</span>
+            <span class="rate-badge rate-happiness">✨ +${cat.happinessRate}pt/h</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  renderCharts(filteredLogs) {
+    const days = this.currentPeriod === "today" ? 1 : (this.currentPeriod === "7d" ? 7 : (this.currentPeriod === "30d" ? 30 : 14));
+    
+    // 1. タイムライングラフ
+    this.chartManager.renderTimelineChart("timelineChart", filteredLogs, days);
+
+    // 2. 4象限マトリクス
+    this.chartManager.renderMatrixChart(
+      "matrixChart", 
+      this.categories, 
+      filteredLogs, 
+      this.matrixXAxis, 
+      this.matrixYAxis
+    );
+
+    // 3. カテゴリ別内訳
+    const distMode = document.getElementById("distributionModeSelect") ? document.getElementById("distributionModeSelect").value : "time";
+    this.chartManager.renderDistributionChart("distributionChart", this.categories, filteredLogs, distMode);
+
+    // 4. ROI効率ランキング
+    this.chartManager.renderEfficiencyChart("efficiencyChart", this.categories, filteredLogs);
+  }
+
+  renderLogsList(filteredLogs) {
+    const container = document.getElementById("logsList");
+    if (!container) return;
+
+    if (filteredLogs.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">🌱</div>
+          <p>この期間の記録はまだありません。</p>
+          <p style="font-size:0.8rem; margin-top:4px;">上部のアクティビティをタップして行動を記録しましょう！</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = filteredLogs.slice(0, 20).map(log => {
+      const cat = this.categories.find(c => c.id === log.categoryId) || { icon: "📝", color: "#8b5cf6" };
+      const d = new Date(log.timestamp);
+      const dateFormatted = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      const stars = "★".repeat(log.rating || 3);
+
+      return `
+        <div class="log-item">
+          <div class="log-left">
+            <div class="log-icon">${cat.icon}</div>
+            <div class="log-details">
+              <h4>${log.title} <span style="font-size:0.75rem; color:#f59e0b; margin-left:6px;">${stars}</span></h4>
+              <div class="log-meta">
+                <span>⏱ ${log.durationMinutes}分</span>
+                <span>💰 ¥${(log.cost || 0).toLocaleString()}</span>
+                <span>📅 ${dateFormatted}</span>
+                ${log.note ? `<span style="color:#cbd5e1;">💭 ${log.note}</span>` : ""}
+              </div>
+            </div>
+          </div>
+          <div class="log-right">
+            <div class="log-points">
+              <div class="log-points-val log-pt-growth">🚀 +${log.growthPoints} pt</div>
+              <div class="log-points-val log-pt-happiness">✨ +${log.happinessPoints} pt</div>
+            </div>
+            <button class="log-del-btn" onclick="app.deleteLog('${log.id}')" title="削除">
+              ✕
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  // =========================================================================
+  // カテゴリ管理モーダル
+  // =========================================================================
+  openCategoryModal() {
+    this.renderCategoryManagerList();
+    document.getElementById("categoryModal").classList.add("open");
+  }
+
+  closeCategoryModal() {
+    document.getElementById("categoryModal").classList.remove("open");
+  }
+
+  renderCategoryManagerList() {
+    const list = document.getElementById("categoryManagerList");
+    list.innerHTML = this.categories.map(c => `
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:rgba(30,41,59,0.5); border-radius:10px; margin-bottom:8px; border:1px solid var(--border-subtle)">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:1.4rem;">${c.icon}</span>
+          <div>
+            <div style="font-weight:700; font-size:0.92rem;">${c.name}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">
+              成長: +${c.growthRate}pt/h | 幸福: +${c.happinessRate}pt/h | 基本¥${c.defaultCost}
+            </div>
+          </div>
+        </div>
+        ${this.categories.length > 1 ? `
+          <button class="btn btn-sm btn-danger" onclick="app.deleteCategory('${c.id}')">削除</button>
+        ` : ""}
+      </div>
+    `).join("");
+  }
+
+  saveNewCategory() {
+    const name = document.getElementById("newCatName").value.trim();
+    const icon = document.getElementById("newCatIcon").value.trim() || "🎯";
+    const color = document.getElementById("newCatColor").value || "#8b5cf6";
+    const growthRate = parseFloat(document.getElementById("newCatGrowth").value) || 10;
+    const happinessRate = parseFloat(document.getElementById("newCatHappiness").value) || 10;
+    const defaultCost = parseInt(document.getElementById("newCatCost").value, 10) || 0;
+    const desc = document.getElementById("newCatDesc").value.trim();
+
+    if (!name) {
+      alert("項目名を入力してください。");
+      return;
+    }
+
+    const newCat = {
+      id: "cat_" + Date.now(),
+      name,
+      icon,
+      color,
+      growthRate,
+      happinessRate,
+      defaultCost,
+      description: desc
+    };
+
+    this.categories.push(newCat);
+    this.saveCategories();
+    this.renderCategoryManagerList();
+    this.renderAll();
+
+    // フォームリセット
+    document.getElementById("newCatName").value = "";
+    document.getElementById("newCatDesc").value = "";
+    this.showToast(`新しいカテゴリ「${name}」を追加しました 🎉`);
+  }
+
+  deleteCategory(catId) {
+    if (confirm("この項目を削除しますか？（過去のログは保持されます）")) {
+      this.categories = this.categories.filter(c => c.id !== catId);
+      this.saveCategories();
+      this.renderCategoryManagerList();
+      this.renderAll();
+      this.showToast("項目を削除しました");
+    }
+  }
+
+  // =========================================================================
+  // イベント登録
+  // =========================================================================
+  bindEvents() {
+    // 期間フィルター
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+        e.target.classList.add("active");
+        this.currentPeriod = e.target.dataset.period;
+        this.renderAll();
+      });
+    });
+
+    // 4象限マトリクス軸切り替え
+    const matrixX = document.getElementById("matrixXSelect");
+    if (matrixX) {
+      matrixX.addEventListener("change", (e) => {
+        this.matrixXAxis = e.target.value;
+        const filteredLogs = this.getFilteredLogs();
+        this.chartManager.renderMatrixChart("matrixChart", this.categories, filteredLogs, this.matrixXAxis, this.matrixYAxis);
+      });
+    }
+
+    const matrixY = document.getElementById("matrixYSelect");
+    if (matrixY) {
+      matrixY.addEventListener("change", (e) => {
+        this.matrixYAxis = e.target.value;
+        const filteredLogs = this.getFilteredLogs();
+        this.chartManager.renderMatrixChart("matrixChart", this.categories, filteredLogs, this.matrixXAxis, this.matrixYAxis);
+      });
+    }
+
+    // 内訳チャートモード切り替え
+    const distSelect = document.getElementById("distributionModeSelect");
+    if (distSelect) {
+      distSelect.addEventListener("change", (e) => {
+        const filteredLogs = this.getFilteredLogs();
+        this.chartManager.renderDistributionChart("distributionChart", this.categories, filteredLogs, e.target.value);
+      });
+    }
+
+    // モーダル内リアルタイム再計算
+    const logCat = document.getElementById("logCategorySelect");
+    const logMin = document.getElementById("logMinutesInput");
+    if (logCat) logCat.addEventListener("change", () => this.recalculateModalPoints());
+    if (logMin) logMin.addEventListener("input", () => this.recalculateModalPoints());
+  }
+
+
+  // =========================================================================
+  // トースト通知
+  // =========================================================================
+  showToast(message) {
+    const toast = document.getElementById("appToast");
+    if (!toast) return;
+    toast.innerHTML = `<span>✨</span><span>${message}</span>`;
+    toast.classList.add("show");
+    setTimeout(() => {
+      toast.classList.remove("show");
+    }, 3200);
+  }
+}
+
+// グローバルインスタンス化
+window.addEventListener("DOMContentLoaded", () => {
+  window.app = new LifeRoiApp();
+});

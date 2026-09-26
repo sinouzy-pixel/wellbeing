@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Life ROI Tracker | 時間とお金を幸福度と成長へ換算する自己投資マネジメント</title>
+  <meta name="description" content="時間とお金というコストをどれだけかけて、幸福度と成長にどれだけ寄与したかがひと目でわかる自己投資トラッカー。ワンタップで時間計測し、幸福度・成長ポイントへ即時換算。">
+  
+  <!-- Mobile & PWA Settings -->
+  <meta name="theme-color" content="#090d16">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="LifeROI">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- Style -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div class="app-container">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">🌱</div>
+        <div class="brand-text">
+          <h1>Life ROI Tracker</h1>
+          <p>時間・お金の投資 × 幸福度・成長のリターン可視化</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-secondary btn-sm" onclick="app.openCategoryModal()" title="項目の追加・レート編集">
+          ⚙️ 項目設定
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="app.openLogModal({ categoryId: app.categories[0]?.id, durationMinutes: 30, cost: 0, rating: 4 })" title="タイマーを使わず過去の行動を入力">
+          ＋ 手動記録
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="app.resetToSampleData()" title="初期サンプルデータを復元">
+          🔄 デモデータ
+        </button>
+      </div>
+    </header>
+
+    <!-- Active Timer Banner (タイマー稼働時に表示) -->
+    <div id="activeTimerBar" class="active-timer-bar">
+      <div class="timer-info-left">
+        <div class="timer-indicator"></div>
+        <div>
+          <div id="timerCategoryTitle" class="timer-title">📖 読書中...</div>
+          <div id="timerRatesBadge" class="timer-rates-badge">
+            <span>🚀 成長: +28pt/h</span>
+            <span>✨ 幸福: +15pt/h</span>
+          </div>
+        </div>
+      </div>
+      <div id="timerDisplay" class="timer-display">00:00:00</div>
+      <div class="timer-controls">
+        <button id="timerPauseBtn" class="btn btn-secondary btn-sm" onclick="app.togglePauseTimer()">
+          ⏸ 一時停止
+        </button>
+        <button class="btn btn-success" onclick="app.promptCompleteTimer()">
+          ✓ 完了・ポイント換算
+        </button>
+        <button class="btn btn-danger btn-sm" onclick="app.cancelTimer()" title="破棄">
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI Summary Grid -->
+    <section class="kpi-grid">
+      <div class="kpi-card kpi-time">
+        <div class="kpi-header">
+          <span class="kpi-label">総投資時間</span>
+          <span class="kpi-icon">⏱</span>
+        </div>
+        <div id="kpiTotalTime" class="kpi-value">0h</div>
+        <div id="kpiTotalTimeSub" class="kpi-subtext">0分 投資</div>
+      </div>
+
+      <div class="kpi-card kpi-cost">
+        <div class="kpi-header">
+          <span class="kpi-label">総投資金額</span>
+          <span class="kpi-icon">💰</span>
+        </div>
+        <div id="kpiTotalCost" class="kpi-value">¥0</div>
+        <div id="kpiTotalCostSub" class="kpi-subtext">自己投資支出</div>
+      </div>
+
+      <div class="kpi-card kpi-growth">
+        <div class="kpi-header">
+          <span class="kpi-label">獲得成長ポイント</span>
+          <span class="kpi-icon">🚀</span>
+        </div>
+        <div id="kpiGrowthPt" class="kpi-value" style="color: #c4b5fd;">+0</div>
+        <div id="kpiGrowthPtSub" class="kpi-subtext">スキル・自己研鑽</div>
+      </div>
+
+      <div class="kpi-card kpi-happiness">
+        <div class="kpi-header">
+          <span class="kpi-label">獲得幸福度ポイント</span>
+          <span class="kpi-icon">✨</span>
+        </div>
+        <div id="kpiHappinessPt" class="kpi-value" style="color: #6ee7b7;">+0</div>
+        <div id="kpiHappinessPtSub" class="kpi-subtext">心の充足・リフレッシュ</div>
+      </div>
+
+      <div class="kpi-card kpi-roi">
+        <div class="kpi-header">
+          <span class="kpi-label">時間対効果 (ROI)</span>
+          <span class="kpi-icon">📈</span>
+        </div>
+        <div id="kpiRoiScore" class="kpi-value" style="color: #38bdf8;">0.0 pt/h</div>
+        <div id="kpiRoiSub" class="kpi-subtext">投資効率</div>
+      </div>
+    </section>
+
+    <!-- Quick Tracker Activity Grid -->
+    <section class="activity-section">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">⚡ クイック時間計測</h2>
+          <p class="section-desc">項目をワンタップしてタイマー開始。終了時に幸福度・成長ポイントへ換算されます。</p>
+        </div>
+      </div>
+      <div id="activityGrid" class="activity-grid">
+        <!-- JSで動的レンダリング -->
+      </div>
+    </section>
+
+    <!-- Analytics Dashboard -->
+    <section class="analytics-section">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">📊 Life ROI 分析ダッシュボード</h2>
+          <p class="section-desc">時間・お金の投資と、幸福・成長リターンの相関と費用対効果を可視化</p>
+        </div>
+      </div>
+
+      <!-- Controls & Filter -->
+      <div class="analytics-controls">
+        <div class="filter-group">
+          <button class="filter-btn" data-period="today">今日</button>
+          <button class="filter-btn active" data-period="7d">過去7日間</button>
+          <button class="filter-btn" data-period="30d">過去30日間</button>
+          <button class="filter-btn" data-period="all">全期間</button>
+        </div>
+
+        <div class="matrix-toggles">
+          <span style="font-size:0.8rem; color:var(--text-muted);">マトリクス設定:</span>
+          <select id="matrixXSelect" class="toggle-select">
+            <option value="time">横軸: 投資時間 (h)</option>
+            <option value="cost">横軸: 投資コスト (円)</option>
+          </select>
+          <select id="matrixYSelect" class="toggle-select">
+            <option value="total">縦軸: 総合リターン (幸福+成長)</option>
+            <option value="happiness">縦軸: 幸福度のみ</option>
+            <option value="growth">縦軸: 成長度のみ</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Charts Grid -->
+      <div class="charts-grid">
+        <!-- 4 Quadrants Matrix -->
+        <div class="chart-card chart-card-lg">
+          <div class="chart-card-header">
+            <div>
+              <div class="chart-card-title">🎯 4象限 Life ROI マトリクス</div>
+              <div class="chart-card-subtitle">投資コストに対するリターン効率をカテゴリ別に比較（円の大きさ＝記録回数）</div>
+            </div>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="matrixChart"></canvas>
+          </div>
+          <div class="matrix-legend-helper">
+            <div class="quadrant-pill"><div class="quadrant-dot q-green"></div>左上: 高リターン・低コスト (神コスパ行動)</div>
+            <div class="quadrant-pill"><div class="quadrant-dot q-purple"></div>右上: 高リターン・高投資 (主力の自己投資)</div>
+            <div class="quadrant-pill"><div class="quadrant-dot q-blue"></div>左下: 低リターン・低コスト (気軽な隙間時間)</div>
+            <div class="quadrant-pill"><div class="quadrant-dot q-amber"></div>右下: 要見直し (コストに対して効果が低い活動)</div>
+          </div>
+        </div>
+
+        <!-- Timeline -->
+        <div class="chart-card chart-card-md">
+          <div class="chart-card-header">
+            <div>
+              <div class="chart-card-title">📅 日別 推移 & 成果バランス</div>
+              <div class="chart-card-subtitle">幸福度・成長ポイントの獲得と投資時間の推移</div>
+            </div>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="timelineChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Distribution -->
+        <div class="chart-card chart-card-sm">
+          <div class="chart-card-header">
+            <div>
+              <div class="chart-card-title">🍩 カテゴリ別内訳</div>
+              <div class="chart-card-subtitle">リソースやポイントの配分比率</div>
+            </div>
+            <select id="distributionModeSelect" class="toggle-select" style="padding:3px 8px; font-size:0.75rem;">
+              <option value="time">投資時間比率</option>
+              <option value="cost">投資費用比率</option>
+              <option value="growth">成長ポイント比率</option>
+              <option value="happiness">幸福ポイント比率</option>
+            </select>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="distributionChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Efficiency Ranking -->
+        <div class="chart-card chart-card-lg">
+          <div class="chart-card-header">
+            <div>
+              <div class="chart-card-title">⚡ 時間効率 (ROI) ランキング</div>
+              <div class="chart-card-subtitle">1時間あたり最もポイントを生み出している活動（成長度 ＋ 幸福度）</div>
+            </div>
+          </div>
+          <div class="chart-wrapper" style="height: 240px;">
+            <canvas id="efficiencyChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Logs Timeline Section -->
+    <section class="logs-section">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">📜 行動ログ履歴</h2>
+          <p class="section-desc">直近の活動実績と獲得ポイント一覧</p>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="app.clearAllData()">
+          全消去
+        </button>
+      </div>
+      <div id="logsList" class="logs-list">
+        <!-- JSで動的レンダリング -->
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Record / Complete Log Modal -->
+  <div id="logModal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">✨ 行動の記録 & ポイント換算</h3>
+        <button class="modal-close-btn" onclick="app.closeLogModal()">×</button>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">活動項目</label>
+        <select id="logCategorySelect" class="form-select"></select>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">かかった時間 (分)</label>
+          <input type="number" id="logMinutesInput" class="form-input" min="1" step="5" value="30">
+        </div>
+        <div class="form-group">
+          <label class="form-label">かかった費用 (円)</label>
+          <input type="number" id="logCostInput" class="form-input" min="0" step="100" value="0">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">実感・充実度評価 (ポイント微調整)</label>
+        <div class="rating-picker">
+          <button type="button" class="rating-star-btn" data-rating="1" onclick="app.setRating(1)">1</button>
+          <button type="button" class="rating-star-btn" data-rating="2" onclick="app.setRating(2)">2</button>
+          <button type="button" class="rating-star-btn" data-rating="3" onclick="app.setRating(3)">3</button>
+          <button type="button" class="rating-star-btn selected" data-rating="4" onclick="app.setRating(4)">4</button>
+          <button type="button" class="rating-star-btn" data-rating="5" onclick="app.setRating(5)">5</button>
+        </div>
+        <div id="ratingDesc" class="rating-desc">★★★★☆ (良い時間・満足: ×1.2)</div>
+      </div>
+
+      <!-- Realtime Points Preview Box -->
+      <div class="points-preview-box">
+        <div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:2px;">🚀 獲得成長ポイント</div>
+          <div id="previewGrowthVal" class="preview-val preview-growth">+0</div>
+        </div>
+        <div style="border-left:1px solid rgba(255,255,255,0.1); margin: 0 10px;"></div>
+        <div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:2px;">✨ 獲得幸福度ポイント</div>
+          <div id="previewHappinessVal" class="preview-val preview-happiness">+0</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">振り返りメモ (任意)</label>
+        <textarea id="logNoteInput" class="form-textarea" rows="2" placeholder="感想、気づき、学んだことなど..."></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="app.closeLogModal()">キャンセル</button>
+        <button class="btn btn-success" onclick="app.saveLogFromModal()">完了して記録する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category Management Modal -->
+  <div id="categoryModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3 class="modal-title">⚙️ 基本項目の設定 & 追加</h3>
+        <button class="modal-close-btn" onclick="app.closeCategoryModal()">×</button>
+      </div>
+
+      <div style="margin-bottom: 24px;">
+        <h4 style="font-size:0.95rem; margin-bottom:12px; color:var(--text-muted);">現在の項目一覧</h4>
+        <div id="categoryManagerList" style="max-height: 220px; overflow-y:auto; padding-right:4px;">
+          <!-- JSでレンダリング -->
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border-subtle); padding-top:18px;">
+        <h4 style="font-size:0.95rem; margin-bottom:12px; color:#fff;">＋ 新しい項目を追加</h4>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">項目名</label>
+            <input type="text" id="newCatName" class="form-input" placeholder="例: 英会話レッスン">
+          </div>
+          <div class="form-group">
+            <label class="form-label">アイコン (絵文字)</label>
+            <input type="text" id="newCatIcon" class="form-input" value="🎯">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">1時間あたり成長pt</label>
+            <input type="number" id="newCatGrowth" class="form-input" value="25" min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">1時間あたり幸福pt</label>
+            <input type="number" id="newCatHappiness" class="form-input" value="15" min="0">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">デフォルト費用 (円)</label>
+            <input type="number" id="newCatCost" class="form-input" value="0" min="0" step="100">
+          </div>
+          <div class="form-group">
+            <label class="form-label">テーマカラー</label>
+            <input type="color" id="newCatColor" class="form-input" value="#8b5cf6" style="padding:4px; height:42px;">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">説明・目的</label>
+          <input type="text" id="newCatDesc" class="form-input" placeholder="例: 英語力向上と異文化理解">
+        </div>
+
+        <div style="text-align: right; margin-top: 12px;">
+          <button class="btn btn-primary" onclick="app.saveNewCategory()">項目を追加する</button>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button class="btn btn-secondary" onclick="app.closeCategoryModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="appToast" class="toast"></div>
+
+  <!-- Scripts -->
+  <script src="js/sample-data.js"></script>
+  <script src="js/chart-manager.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>
