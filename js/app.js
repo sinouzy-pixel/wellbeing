@@ -523,11 +523,11 @@ class LifeRoiApp {
     });
 
     const descMap = {
-      1: "★☆☆☆☆ (充実度低め・気分乗らず: ×0.65)",
-      2: "★★☆☆☆ (やや不完全燃焼: ×0.85)",
+      1: "★☆☆☆☆ (不完全燃焼・気分乗らず: ×0.2)",
+      2: "★★☆☆☆ (やや微妙・途切れがち: ×0.6)",
       3: "★★★☆☆ (標準的・日常通り: ×1.0)",
-      4: "★★★★☆ (良い時間・満足: ×1.2)",
-      5: "★★★★★ (最高！超充実 & 成長実感: ×1.45)"
+      4: "★★★★☆ (充実・集中できた: ×1.5)",
+      5: "★★★★★ (最高！超充実・ゾーン体験: ×2.0)"
     };
     document.getElementById("ratingDesc").innerText = descMap[this.selectedRating];
   }
@@ -779,22 +779,71 @@ class LifeRoiApp {
 
   renderCategoryManagerList() {
     const list = document.getElementById("categoryManagerList");
+    if (!list) return;
+
     list.innerHTML = this.categories.map(c => `
-      <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:rgba(30,41,59,0.5); border-radius:10px; margin-bottom:8px; border:1px solid var(--border-subtle)">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <span style="font-size:1.4rem;">${c.icon}</span>
-          <div>
-            <div style="font-weight:700; font-size:0.92rem;">${c.name}</div>
-            <div style="font-size:0.75rem; color:var(--text-muted);">
-              成長: +${c.growthRate}pt/h | 幸福: +${c.happinessRate}pt/h | 基本¥${c.defaultCost}
+      <div style="background:rgba(30,41,59,0.7); border-radius:12px; padding:12px 14px; margin-bottom:10px; border:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:1.5rem;">${c.icon}</span>
+            <div>
+              <span style="font-weight:700; font-size:0.95rem;">${c.name}</span>
+              ${c.defaultCost ? `<span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">(基準: ¥${c.defaultCost.toLocaleString()})</span>` : ""}
             </div>
           </div>
+          ${this.categories.length > 1 ? `
+            <button class="btn btn-sm btn-danger" style="padding:3px 8px; font-size:0.75rem;" onclick="app.deleteCategory('${c.id}')" title="削除">
+              ✕ 削除
+            </button>
+          ` : ""}
         </div>
-        ${this.categories.length > 1 ? `
-          <button class="btn btn-sm btn-danger" onclick="app.deleteCategory('${c.id}')">削除</button>
-        ` : ""}
+
+        <!-- レート直接編集ボックス -->
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; background:rgba(15,23,42,0.6); padding:8px 12px; border-radius:8px;">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <label style="font-size:0.78rem; color:#c4b5fd; display:flex; align-items:center; gap:4px;">
+              🚀 成長:
+              <input type="number" id="edit_growth_${c.id}" value="${c.growthRate}" 
+                     style="width:58px; padding:4px 6px; background:#1e293b; border:1px solid #475569; border-radius:6px; color:#fff; font-size:0.85rem; text-align:center;" min="0" step="1">
+              pt/h
+            </label>
+            <label style="font-size:0.78rem; color:#6ee7b7; display:flex; align-items:center; gap:4px;">
+              ✨ 幸福:
+              <input type="number" id="edit_happiness_${c.id}" value="${c.happinessRate}" 
+                     style="width:58px; padding:4px 6px; background:#1e293b; border:1px solid #475569; border-radius:6px; color:#fff; font-size:0.85rem; text-align:center;" min="0" step="1">
+              pt/h
+            </label>
+          </div>
+          <button class="btn btn-sm btn-primary" style="padding:4px 10px; font-size:0.78rem;" onclick="app.updateCategoryRates('${c.id}')">
+            💾 レート変更を保存
+          </button>
+        </div>
       </div>
     `).join("");
+  }
+
+  updateCategoryRates(catId) {
+    const cat = this.categories.find(c => c.id === catId);
+    if (!cat) return;
+
+    const growthInput = document.getElementById(`edit_growth_${catId}`);
+    const happinessInput = document.getElementById(`edit_happiness_${catId}`);
+
+    const newGrowth = parseFloat(growthInput.value);
+    const newHappiness = parseFloat(happinessInput.value);
+
+    if (isNaN(newGrowth) || isNaN(newHappiness) || newGrowth < 0 || newHappiness < 0) {
+      alert("0以上の数値を入力してください。");
+      return;
+    }
+
+    cat.growthRate = newGrowth;
+    cat.happinessRate = newHappiness;
+
+    this.saveCategories();
+    this.renderAll();
+    this.renderCategoryManagerList();
+    this.showToast(`✨「${cat.name}」のレートを更新しました！ (成長:+${newGrowth}pt/h, 幸福:+${newHappiness}pt/h)`);
   }
 
   saveNewCategory() {

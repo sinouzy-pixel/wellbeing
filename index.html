@@ -297,7 +297,7 @@
           <button type="button" class="rating-star-btn selected" data-rating="4" onclick="app.setRating(4)">4</button>
           <button type="button" class="rating-star-btn" data-rating="5" onclick="app.setRating(5)">5</button>
         </div>
-        <div id="ratingDesc" class="rating-desc">★★★★☆ (良い時間・満足: ×1.2)</div>
+        <div id="ratingDesc" class="rating-desc">★★★★☆ (充実・集中できた: ×1.5)</div>
       </div>
 
       <!-- Realtime Points Preview Box -->
@@ -334,8 +334,11 @@
       </div>
 
       <div style="margin-bottom: 24px;">
-        <h4 style="font-size:0.95rem; margin-bottom:12px; color:var(--text-muted);">現在の項目一覧</h4>
-        <div id="categoryManagerList" style="max-height: 220px; overflow-y:auto; padding-right:4px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h4 style="font-size:0.95rem; color:var(--text-muted);">現在の項目一覧</h4>
+          <span style="font-size:0.75rem; color:var(--accent-purple);">※数値を書き換えて「保存」で変更可能</span>
+        </div>
+        <div id="categoryManagerList" style="max-height: 320px; overflow-y:auto; padding-right:4px;">
           <!-- JSでレンダリング -->
         </div>
       </div>
