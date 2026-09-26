@@ -13,9 +13,11 @@ class LifeRoiApp {
     this.matrixYAxis = "total";
     this.chartManager = new ChartManager();
 
-    // モーダル一時状態
-    this.pendingCompletion = null;
-    this.selectedRating = 4;
+    // 同期関連
+    this.firebaseApp = null;
+    this.firestoreDb = null;
+    this.syncDocUnsubscribe = null;
+    this.isCloudSyncActive = false;
 
     this.init();
   }
@@ -23,6 +25,7 @@ class LifeRoiApp {
   init() {
     this.loadData();
     this.bindEvents();
+    this.initCloudSyncIfConfigured();
     this.renderAll();
     this.checkPersistedTimer();
   }
@@ -31,6 +34,8 @@ class LifeRoiApp {
   // データの永続化 & 初期化
   // =========================================================================
   loadData() {
+    const hasInit = localStorage.getItem("liferoi_initialized");
+
     // カテゴリ読み込み
     const savedCats = localStorage.getItem("liferoi_categories");
     if (savedCats) {
@@ -46,26 +51,32 @@ class LifeRoiApp {
 
     // ログ読み込み
     const savedLogs = localStorage.getItem("liferoi_logs");
-    if (savedLogs) {
+    if (savedLogs !== null) {
       try {
         this.logs = JSON.parse(savedLogs);
       } catch (e) {
-        this.logs = generateSampleLogs();
+        this.logs = [];
         this.saveLogs();
       }
-    } else {
-      // 初回はサンプルデータ投入
+    } else if (!hasInit) {
+      // 完全な初回アクセス時のみサンプルデータを投入
       this.logs = generateSampleLogs();
       this.saveLogs();
+      localStorage.setItem("liferoi_initialized", "true");
+    } else {
+      this.logs = [];
     }
   }
 
   saveCategories() {
     localStorage.setItem("liferoi_categories", JSON.stringify(this.categories));
+    this.triggerCloudSyncPush();
   }
 
   saveLogs() {
     localStorage.setItem("liferoi_logs", JSON.stringify(this.logs));
+    localStorage.setItem("liferoi_initialized", "true");
+    this.triggerCloudSyncPush();
   }
 
   resetToSampleData() {
@@ -80,11 +91,236 @@ class LifeRoiApp {
   }
 
   clearAllData() {
-    if (confirm("すべての行動記録を削除しますか？この操作は取り消せません。")) {
+    if (confirm("すべての行動記録を削除して空にしますか？この操作は取り消せません。")) {
       this.logs = [];
       this.saveLogs();
       this.renderAll();
-      this.showToast("すべての記録をクリアしました");
+      this.showToast("すべての記録を削除し、空にしました 🗑️");
+    }
+  }
+
+  // =========================================================================
+  // スマホ ⇄ PC 同期機能 (手動 & クラウド)
+  // =========================================================================
+  openSyncModal() {
+    // 既存設定の復元
+    const savedKey = localStorage.getItem("liferoi_sync_key") || "";
+    const savedConfig = localStorage.getItem("liferoi_firebase_config") || "";
+    const keyInput = document.getElementById("syncSecretKey");
+    const configInput = document.getElementById("firebaseConfigInput");
+    if (keyInput) keyInput.value = savedKey;
+    if (configInput) configInput.value = savedConfig;
+
+    const disconnectBtn = document.getElementById("disconnectCloudBtn");
+    if (disconnectBtn) {
+      disconnectBtn.style.display = this.isCloudSyncActive ? "inline-block" : "none";
+    }
+
+    document.getElementById("syncModal").classList.add("open");
+  }
+
+  closeSyncModal() {
+    document.getElementById("syncModal").classList.remove("open");
+  }
+
+  switchSyncTab(tab) {
+    const manualSec = document.getElementById("manualSyncSection");
+    const cloudSec = document.getElementById("cloudSyncSection");
+    const manualBtn = document.getElementById("tabBtnManualSync");
+    const cloudBtn = document.getElementById("tabBtnCloudSync");
+
+    if (tab === "manual") {
+      manualSec.style.display = "block";
+      cloudSec.style.display = "none";
+      manualBtn.className = "btn btn-primary btn-sm";
+      cloudBtn.className = "btn btn-secondary btn-sm";
+    } else {
+      manualSec.style.display = "none";
+      cloudSec.style.display = "block";
+      manualBtn.className = "btn btn-secondary btn-sm";
+      cloudBtn.className = "btn btn-primary btn-sm";
+    }
+  }
+
+  // ① かんたん手動同期（クリップボードコピー＆取り込み）
+  copySyncData() {
+    const payload = {
+      version: 1,
+      timestamp: new Date().toISOString(),
+      categories: this.categories,
+      logs: this.logs
+    };
+    const jsonStr = JSON.stringify(payload);
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(jsonStr).then(() => {
+        this.showToast("データをクリップボードにコピーしました！📋 他端末にペーストしてください");
+      }).catch(() => {
+        prompt("以下のデータを全選択してコピーしてください:", jsonStr);
+      });
+    } else {
+      prompt("以下のデータを全選択してコピーしてください:", jsonStr);
+    }
+  }
+
+  importSyncData() {
+    const text = document.getElementById("importSyncText").value.trim();
+    if (!text) {
+      alert("コピーしたデータを貼り付けてください。");
+      return;
+    }
+
+    try {
+      const data = JSON.parse(text);
+      if (!Array.isArray(data.logs) || !Array.isArray(data.categories)) {
+        throw new Error("無効なデータ形式です");
+      }
+
+      if (confirm(`データを取り込みますか？\n・行動記録: ${data.logs.length}件\n・項目数: ${data.categories.length}個`)) {
+        this.categories = data.categories;
+        this.logs = data.logs;
+        this.saveCategories();
+        this.saveLogs();
+        this.renderAll();
+        document.getElementById("importSyncText").value = "";
+        this.closeSyncModal();
+        this.showToast("他端末のデータを取り込み、同期しました！✨");
+      }
+    } catch (e) {
+      alert("データの解析に失敗しました。正しいデータ形式かご確認ください。");
+    }
+  }
+
+  // ② Firebase による全自動クラウド同期
+  initCloudSyncIfConfigured() {
+    const savedKey = localStorage.getItem("liferoi_sync_key");
+    const savedConfig = localStorage.getItem("liferoi_firebase_config");
+    if (savedKey && savedConfig) {
+      this.connectCloudSync(true);
+    }
+  }
+
+  connectCloudSync(isSilent = false) {
+    const key = document.getElementById("syncSecretKey")?.value.trim() || localStorage.getItem("liferoi_sync_key");
+    const configRaw = document.getElementById("firebaseConfigInput")?.value.trim() || localStorage.getItem("liferoi_firebase_config");
+
+    if (!key) {
+      if (!isSilent) alert("同期キー（合言葉）を入力してください。");
+      return;
+    }
+    if (!configRaw) {
+      if (!isSilent) alert("Firebaseの設定を入力してください。");
+      return;
+    }
+
+    try {
+      let configObj;
+      if (configRaw.includes("{")) {
+        const jsonMatch = configRaw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          configObj = JSON.parse(jsonMatch[0]);
+        }
+      }
+      if (!configObj) throw new Error("設定コードを読み取れませんでした");
+
+      if (window.firebase) {
+        if (!firebase.apps.length) {
+          this.firebaseApp = firebase.initializeApp(configObj);
+        } else {
+          this.firebaseApp = firebase.app();
+        }
+        this.firestoreDb = firebase.firestore();
+
+        localStorage.setItem("liferoi_sync_key", key);
+        localStorage.setItem("liferoi_firebase_config", JSON.stringify(configObj));
+
+        // リアルタイムリスナー開始
+        this.startCloudSyncListener(key);
+        this.isCloudSyncActive = true;
+        this.updateSyncStatusUI();
+
+        if (!isSilent) {
+          this.closeSyncModal();
+          this.showToast("☁️ クラウド自動同期に接続しました！");
+        }
+      }
+    } catch (e) {
+      if (!isSilent) alert("Firebaseへの接続に失敗しました: " + e.message);
+    }
+  }
+
+  startCloudSyncListener(secretKey) {
+    if (!this.firestoreDb) return;
+    if (this.syncDocUnsubscribe) this.syncDocUnsubscribe();
+
+    const docRef = this.firestoreDb.collection("liferoi_vault").doc(secretKey);
+
+    this.syncDocUnsubscribe = docRef.onSnapshot(doc => {
+      if (doc.exists) {
+        const data = doc.data();
+        if (data && data.updatedAt) {
+          const remoteTime = new Date(data.updatedAt).getTime();
+          const localTime = parseInt(localStorage.getItem("liferoi_last_sync") || "0", 10);
+
+          if (remoteTime > localTime) {
+            // クラウドの方が新しい場合は反映
+            if (data.categories) this.categories = data.categories;
+            if (data.logs) this.logs = data.logs;
+            localStorage.setItem("liferoi_categories", JSON.stringify(this.categories));
+            localStorage.setItem("liferoi_logs", JSON.stringify(this.logs));
+            localStorage.setItem("liferoi_last_sync", String(remoteTime));
+            this.renderAll();
+            this.showToast("☁️ クラウドから最新データを同期しました");
+          }
+        }
+      } else {
+        // クラウドにまだデータがない場合は初期アップロード
+        this.triggerCloudSyncPush();
+      }
+    }, err => {
+      console.warn("Sync listener warning:", err);
+    });
+  }
+
+  triggerCloudSyncPush() {
+    if (!this.isCloudSyncActive || !this.firestoreDb) return;
+    const key = localStorage.getItem("liferoi_sync_key");
+    if (!key) return;
+
+    const now = Date.now();
+    localStorage.setItem("liferoi_last_sync", String(now));
+
+    this.firestoreDb.collection("liferoi_vault").doc(key).set({
+      categories: this.categories,
+      logs: this.logs,
+      updatedAt: new Date(now).toISOString()
+    }, { merge: true }).catch(err => {
+      console.warn("Cloud push failed:", err);
+    });
+  }
+
+  disconnectCloudSync() {
+    if (confirm("クラウド同期を解除しますか？ローカルのデータはそのまま残ります。")) {
+      if (this.syncDocUnsubscribe) this.syncDocUnsubscribe();
+      this.isCloudSyncActive = false;
+      localStorage.removeItem("liferoi_sync_key");
+      this.updateSyncStatusUI();
+      this.closeSyncModal();
+      this.showToast("クラウド同期を解除しました");
+    }
+  }
+
+  updateSyncStatusUI() {
+    const btn = document.getElementById("syncStatusBtn");
+    if (!btn) return;
+    if (this.isCloudSyncActive) {
+      btn.innerHTML = "☁️ 同期中 🟢";
+      btn.classList.add("btn-success");
+      btn.classList.remove("btn-secondary");
+    } else {
+      btn.innerHTML = "☁️ 端末同期";
+      btn.classList.remove("btn-success");
+      btn.classList.add("btn-secondary");
     }
   }
 

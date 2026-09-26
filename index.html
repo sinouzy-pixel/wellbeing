@@ -23,6 +23,10 @@
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
+  <!-- Firebase CDN (クラウド同期用) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
   <!-- Style -->
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -40,14 +44,17 @@
         </div>
       </div>
       <div class="header-actions">
+        <button id="syncStatusBtn" class="btn btn-secondary btn-sm" onclick="app.openSyncModal()" title="PCとスマホのデータ同期設定">
+          ☁️ 端末同期
+        </button>
         <button class="btn btn-secondary btn-sm" onclick="app.openCategoryModal()" title="項目の追加・レート編集">
           ⚙️ 項目設定
         </button>
         <button class="btn btn-secondary btn-sm" onclick="app.openLogModal({ categoryId: app.categories[0]?.id, durationMinutes: 30, cost: 0, rating: 4 })" title="タイマーを使わず過去の行動を入力">
           ＋ 手動記録
         </button>
-        <button class="btn btn-secondary btn-sm" onclick="app.resetToSampleData()" title="初期サンプルデータを復元">
-          🔄 デモデータ
+        <button class="btn btn-danger btn-sm" onclick="app.clearAllData()" title="サンプル記録をすべて消去して空にする">
+          🗑️ サンプル消去
         </button>
       </div>
     </header>
@@ -381,6 +388,88 @@
 
       <div class="modal-actions" style="margin-top: 20px;">
         <button class="btn btn-secondary" onclick="app.closeCategoryModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sync Modal (端末間データ同期) -->
+  <div id="syncModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 540px;">
+      <div class="modal-header">
+        <h3 class="modal-title">☁️ スマホ ⇄ PC データ同期</h3>
+        <button class="modal-close-btn" onclick="app.closeSyncModal()">×</button>
+      </div>
+
+      <!-- Sync Tabs -->
+      <div style="display:flex; gap:10px; margin-bottom:18px; border-bottom:1px solid var(--border-subtle); padding-bottom:12px;">
+        <button id="tabBtnManualSync" class="btn btn-primary btn-sm" onclick="app.switchSyncTab('manual')">
+          📋 かんたん手動同期（設定不要）
+        </button>
+        <button id="tabBtnCloudSync" class="btn btn-secondary btn-sm" onclick="app.switchSyncTab('cloud')">
+          ⚡ リアルタイム自動同期（Firebase）
+        </button>
+      </div>
+
+      <!-- Manual Sync Section (設定なしで即同期) -->
+      <div id="manualSyncSection">
+        <p style="font-size:0.84rem; color:var(--text-muted); margin-bottom:16px;">
+          アカウント登録不要！スマホまたはPCで書き出したデータを、もう一方の端末に貼り付けるだけで全データを瞬時に同期・引き継ぎできます。
+        </p>
+
+        <div style="background:rgba(30,41,59,0.5); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-subtle); margin-bottom:16px;">
+          <h4 style="font-size:0.92rem; margin-bottom:8px; color:#fff;">① 現在のデータを書き出す</h4>
+          <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:10px;">現在の記録・設定データをテキストとしてコピーします。</p>
+          <button class="btn btn-secondary btn-sm" onclick="app.copySyncData()">
+            📋 データをクリップボードにコピー
+          </button>
+        </div>
+
+        <div style="background:rgba(30,41,59,0.5); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-subtle);">
+          <h4 style="font-size:0.92rem; margin-bottom:8px; color:#fff;">② 他端末のデータを取り込む</h4>
+          <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:8px;">コピーしたデータをここに貼り付けて取り込みます。</p>
+          <textarea id="importSyncText" class="form-textarea" rows="3" placeholder="コピーしたデータをここにペースト..."></textarea>
+          <div style="text-align:right; margin-top:10px;">
+            <button class="btn btn-success btn-sm" onclick="app.importSyncData()">
+              ✓ データを取り込んで同期
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cloud Sync Section (Firebase) -->
+      <div id="cloudSyncSection" style="display:none;">
+        <p style="font-size:0.84rem; color:var(--text-muted); margin-bottom:14px;">
+          Google Firebase（無料）を連携すると、スマホで記録した瞬間にPCの画面も自動でリアルタイム更新されます。
+        </p>
+
+        <div class="form-group">
+          <label class="form-label">同期キー（あなた専用の合言葉）</label>
+          <input type="text" id="syncSecretKey" class="form-input" placeholder="例: my-life-roi-key-2026">
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">
+            スマホとPCで全く同じ合言葉を入力すると、同じデータを参照します。
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Firebase Config (JSONまたは設定コード)</label>
+          <textarea id="firebaseConfigInput" class="form-textarea" rows="4" placeholder='{"apiKey": "AIzaSy...", "projectId": "...", ...}'></textarea>
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">
+            ※ Firebaseコンソールで作成した無料Webアプリの設定オブジェクトを貼り付けます。
+          </p>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px;">
+          <button id="disconnectCloudBtn" class="btn btn-danger btn-sm" style="display:none;" onclick="app.disconnectCloudSync()">
+            連携解除
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="app.connectCloudSync()">
+            ☁️ クラウド同期に接続
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button class="btn btn-secondary" onclick="app.closeSyncModal()">閉じる</button>
       </div>
     </div>
   </div>
