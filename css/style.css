@@ -974,3 +974,187 @@ header.app-header {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   Weekly 24h Activity Timeline
+   ========================================================================== */
+.weekly-timeline-card {
+  grid-column: span 12;
+  background: var(--bg-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.weekly-header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.weekly-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.weekly-date-range {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text-main);
+}
+
+.weekly-timeline-scroll {
+  overflow-x: auto;
+  padding-bottom: 12px;
+}
+
+.weekly-grid-container {
+  min-width: 740px;
+  display: grid;
+  grid-template-columns: 52px repeat(7, 1fr);
+  gap: 6px;
+  position: relative;
+}
+
+/* Time axis column */
+.weekly-time-axis {
+  position: relative;
+  height: 520px;
+  border-right: 1px solid var(--border-subtle);
+  padding-right: 4px;
+}
+
+.weekly-time-label {
+  position: absolute;
+  right: 6px;
+  font-size: 0.7rem;
+  font-family: 'Outfit', monospace;
+  color: var(--text-dark);
+  transform: translateY(-50%);
+  user-select: none;
+}
+
+/* Day column */
+.weekly-day-col {
+  position: relative;
+  height: 520px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color var(--transition-fast);
+}
+
+.weekly-day-col:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.weekly-day-col.is-today {
+  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(139, 92, 246, 0.05);
+}
+
+.weekly-col-header {
+  position: sticky;
+  top: 0;
+  background: rgba(30, 41, 59, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 8px 6px;
+  text-align: center;
+  border-bottom: 1px solid var(--border-subtle);
+  z-index: 10;
+}
+
+.weekly-col-dayname {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.weekly-col-date {
+  font-size: 0.92rem;
+  font-weight: 800;
+  margin-top: 1px;
+}
+
+.weekly-col-dayname.today-text, .weekly-col-date.today-text {
+  color: var(--accent-purple);
+}
+
+/* Background hour guide lines */
+.weekly-hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.04);
+  pointer-events: none;
+}
+
+.weekly-hour-line.major {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Event block in timeline */
+.timeline-event-block {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  border-radius: 6px;
+  padding: 4px 6px;
+  color: #fff;
+  border: 1px solid;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  transition: all var(--transition-fast);
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.timeline-event-block:hover {
+  transform: scale(1.02);
+  z-index: 20;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+}
+
+.timeline-block-time {
+  font-size: 0.68rem;
+  font-family: 'Outfit', monospace;
+  font-weight: 700;
+  opacity: 0.9;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.timeline-block-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+.timeline-block-pts {
+  font-size: 0.65rem;
+  opacity: 0.85;
+  margin-top: 2px;
+}

@@ -19,7 +19,44 @@ class LifeRoiApp {
     this.syncDocUnsubscribe = null;
     this.isCloudSyncActive = false;
 
+    // 週間タイムライン関連
+    this.weekOffset = 0; // 0: 今週, -1: 前週, +1: 翌週...
+
     this.init();
+  }
+
+  // ログの形式を正規化 (date, startTime, endTimeを補完)
+  normalizeLog(log) {
+    if (!log) return log;
+    const duration = log.durationMinutes || 30;
+
+    let timestamp = log.timestamp;
+    if (!timestamp) {
+      timestamp = new Date().toISOString();
+      log.timestamp = timestamp;
+    }
+
+    const d = new Date(timestamp);
+    const pad = (n) => String(n).padStart(2, "0");
+
+    if (!log.date) {
+      log.date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+
+    if (!log.startTime || !log.endTime) {
+      const endHour = d.getHours();
+      const endMin = d.getMinutes();
+      const endTotalMin = endHour * 60 + endMin;
+      const startTotalMin = Math.max(0, endTotalMin - duration);
+
+      const startH = Math.floor(startTotalMin / 60) % 24;
+      const startM = startTotalMin % 60;
+
+      if (!log.startTime) log.startTime = `${pad(startH)}:${pad(startM)}`;
+      if (!log.endTime) log.endTime = `${pad(endHour)}:${pad(endMin)}`;
+    }
+
+    return log;
   }
 
   init() {
@@ -53,14 +90,15 @@ class LifeRoiApp {
     const savedLogs = localStorage.getItem("liferoi_logs");
     if (savedLogs !== null) {
       try {
-        this.logs = JSON.parse(savedLogs);
+        const rawLogs = JSON.parse(savedLogs);
+        this.logs = (Array.isArray(rawLogs) ? rawLogs : []).map(l => this.normalizeLog(l));
       } catch (e) {
         this.logs = [];
         this.saveLogs();
       }
     } else if (!hasInit) {
       // 完全な初回アクセス時のみサンプルデータを投入
-      this.logs = generateSampleLogs();
+      this.logs = generateSampleLogs().map(l => this.normalizeLog(l));
       this.saveLogs();
       localStorage.setItem("liferoi_initialized", "true");
     } else {
@@ -394,9 +432,16 @@ class LifeRoiApp {
     const cat = this.categories.find(c => c.id === this.activeTimer.categoryId);
     const elapsedMinutes = Math.max(1, Math.round(this.activeTimer.elapsedSeconds / 60));
 
+    const startDate = new Date(this.activeTimer.startTime);
+    const endDate = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+
     this.openLogModal({
       categoryId: cat.id,
       title: cat.name,
+      date: `${startDate.getFullYear()}-${pad(startDate.getMonth() + 1)}-${pad(startDate.getDate())}`,
+      startTime: `${pad(startDate.getHours())}:${pad(startDate.getMinutes())}`,
+      endTime: `${pad(endDate.getHours())}:${pad(endDate.getMinutes())}`,
       durationMinutes: elapsedMinutes,
       cost: cat.defaultCost || 0,
       rating: 4,
@@ -494,7 +539,36 @@ class LifeRoiApp {
       </option>
     `).join("");
 
-    document.getElementById("logMinutesInput").value = initialData.durationMinutes || 30;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+    const dateVal = initialData.date || todayStr;
+    const duration = initialData.durationMinutes || 30;
+
+    let startVal = initialData.startTime;
+    let endVal = initialData.endTime;
+
+    if (!startVal || !endVal) {
+      const endTotalMin = now.getHours() * 60 + now.getMinutes();
+      const startTotalMin = Math.max(0, endTotalMin - duration);
+      const startH = Math.floor(startTotalMin / 60) % 24;
+      const startM = startTotalMin % 60;
+
+      if (!startVal) startVal = `${pad(startH)}:${pad(startM)}`;
+      if (!endVal) endVal = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    }
+
+    const dateInput = document.getElementById("logDateInput");
+    const startInput = document.getElementById("logStartTimeInput");
+    const endInput = document.getElementById("logEndTimeInput");
+    const minInput = document.getElementById("logMinutesInput");
+
+    if (dateInput) dateInput.value = dateVal;
+    if (startInput) startInput.value = startVal;
+    if (endInput) endInput.value = endVal;
+    if (minInput) minInput.value = duration;
+
     document.getElementById("logCostInput").value = initialData.cost !== undefined ? initialData.cost : 0;
     document.getElementById("logNoteInput").value = initialData.note || "";
 
@@ -564,6 +638,14 @@ class LifeRoiApp {
     const cost = parseInt(document.getElementById("logCostInput").value, 10) || 0;
     const note = document.getElementById("logNoteInput").value.trim();
 
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+    const dateVal = document.getElementById("logDateInput")?.value || todayStr;
+    const startTimeVal = document.getElementById("logStartTimeInput")?.value || "12:00";
+    const endTimeVal = document.getElementById("logEndTimeInput")?.value || "12:30";
+
     if (minutes <= 0) {
       alert("時間は1分以上を入力してください。");
       return;
@@ -582,16 +664,28 @@ class LifeRoiApp {
     const growthPoints = !isNaN(inputGrowthVal) && inputGrowthVal >= 0 ? Math.round(inputGrowthVal * 10) / 10 : defaultGrowth;
     const happinessPoints = !isNaN(inputHappinessVal) && inputHappinessVal >= 0 ? Math.round(inputHappinessVal * 10) / 10 : defaultHappiness;
 
+    // 正確なタイムスタンプ生成
+    let timestamp = new Date().toISOString();
+    try {
+      const parsedTime = new Date(`${dateVal}T${startTimeVal}:00`);
+      if (!isNaN(parsedTime.getTime())) {
+        timestamp = parsedTime.toISOString();
+      }
+    } catch (e) {}
+
     const newLog = {
       id: "log_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
       categoryId: cat.id,
       title: cat.name,
+      date: dateVal,
+      startTime: startTimeVal,
+      endTime: endTimeVal,
       durationMinutes: minutes,
       cost,
       rating: this.selectedRating,
       happinessPoints,
       growthPoints,
-      timestamp: new Date().toISOString(),
+      timestamp,
       note
     };
 
@@ -604,7 +698,7 @@ class LifeRoiApp {
 
     this.closeLogModal();
     this.renderAll();
-    this.showToast(`✨ ${cat.name}を記録しました！ (+${happinessPoints}幸福 / +${growthPoints}成長)`);
+    this.showToast(`✨ ${cat.name} (${startTimeVal}〜${endTimeVal}) を記録しました！ (+${happinessPoints}幸福 / +${growthPoints}成長)`);
   }
 
   deleteLog(logId) {
@@ -680,58 +774,153 @@ class LifeRoiApp {
     const filteredLogs = this.getFilteredLogs();
     this.renderKPIs(filteredLogs);
     this.renderActivityCards();
+    this.renderWeeklyTimeline();
     this.renderCharts(filteredLogs);
     this.renderLogsList(filteredLogs);
   }
 
-  renderActivityCards() {
-    const container = document.getElementById("activityGrid");
-    if (!container) return;
-
-    container.innerHTML = this.categories.map(cat => {
-      const isActive = this.activeTimer && this.activeTimer.categoryId === cat.id;
-      return `
-        <div class="activity-card ${isActive ? "is-active" : ""}" 
-             style="--cat-color: ${cat.color}" 
-             onclick="app.startTimer('${cat.id}')">
-          <div class="activity-top">
-            <div class="activity-icon-wrap" style="color: ${cat.color}">${cat.icon}</div>
-            <button class="activity-quick-btn" title="ワンタップで計測">
-              ${isActive ? "計測中..." : "▶ タップで計測"}
-            </button>
-          </div>
-          <div class="activity-title">${cat.name}</div>
-          <div class="activity-desc">${cat.description || ""}</div>
-          <div class="activity-rates">
-            <span class="rate-badge rate-growth">🚀 +${cat.growthRate}pt/h</span>
-            <span class="rate-badge rate-happiness">✨ +${cat.happinessRate}pt/h</span>
-          </div>
-        </div>
-      `;
-    }).join("");
+  // 週間24時間アクティビティ タイムテーブル描画
+  navigateWeek(delta) {
+    if (delta === 0) {
+      this.weekOffset = 0;
+    } else {
+      this.weekOffset += delta;
+    }
+    this.renderWeeklyTimeline();
   }
 
-  renderCharts(filteredLogs) {
-    const days = this.currentPeriod === "today" ? 1 : (this.currentPeriod === "7d" ? 7 : (this.currentPeriod === "30d" ? 30 : 14));
-    
-    // 1. タイムライングラフ
-    this.chartManager.renderTimelineChart("timelineChart", filteredLogs, days);
+  renderWeeklyTimeline() {
+    const grid = document.getElementById("weeklyTimelineGrid");
+    const label = document.getElementById("weeklyDateRangeLabel");
+    if (!grid) return;
 
-    // 2. 4象限マトリクス
-    this.chartManager.renderMatrixChart(
-      "matrixChart", 
-      this.categories, 
-      filteredLogs, 
-      this.matrixXAxis, 
-      this.matrixYAxis
-    );
+    const pad = (n) => String(n).padStart(2, "0");
+    const now = new Date();
+    // 基準日 (今週 + weekOffset * 7日)
+    const baseDate = new Date(now.getTime() + this.weekOffset * 7 * 86400000);
 
-    // 3. カテゴリ別内訳
-    const distMode = document.getElementById("distributionModeSelect") ? document.getElementById("distributionModeSelect").value : "time";
-    this.chartManager.renderDistributionChart("distributionChart", this.categories, filteredLogs, distMode);
+    // 月曜日を週の起点とする
+    const dayOfWeek = baseDate.getDay(); // 0(日)〜6(土)
+    const diffToMonday = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+    const monday = new Date(baseDate);
+    monday.setDate(baseDate.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
 
-    // 4. ROI効率ランキング
-    this.chartManager.renderEfficiencyChart("efficiencyChart", this.categories, filteredLogs);
+    const weekDays = [];
+    const dayNames = ["月", "火", "水", "木", "金", "土", "日"];
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const isToday = (dateStr === todayStr);
+
+      weekDays.push({
+        date: d,
+        dateStr,
+        dayName: dayNames[i],
+        isToday,
+        logs: []
+      });
+    }
+
+    // 期間ラベルの更新
+    if (label) {
+      const first = weekDays[0].date;
+      const last = weekDays[6].date;
+      label.innerText = `${first.getFullYear()}年 ${first.getMonth() + 1}/${first.getDate()}(月) 〜 ${last.getMonth() + 1}/${last.getDate()}(日)${this.weekOffset === 0 ? " 【今週】" : ""}`;
+    }
+
+    // ログを日付ごとにマッピング
+    this.logs.forEach(rawLog => {
+      const log = this.normalizeLog(rawLog);
+      const targetDay = weekDays.find(w => w.dateStr === log.date);
+      if (targetDay) {
+        targetDay.logs.push(log);
+      }
+    });
+
+    // HTMLの構築
+    // 1. 左端の時間軸カラム (0:00 〜 24:00、3時間刻み)
+    let html = `<div class="weekly-time-axis">`;
+    const hoursMark = [0, 3, 6, 9, 12, 15, 18, 21, 24];
+    hoursMark.forEach(h => {
+      const topPct = (h / 24) * 100;
+      html += `<div class="weekly-time-label" style="top:${topPct}%;">${pad(h)}:00</div>`;
+    });
+    html += `</div>`;
+
+    // 2. 7つの曜日カラム
+    weekDays.forEach(day => {
+      const totalMin = day.logs.reduce((sum, l) => sum + (l.durationMinutes || 0), 0);
+      const totalHours = Math.round((totalMin / 60) * 10) / 10;
+
+      html += `
+        <div class="weekly-day-col ${day.isToday ? "is-today" : ""}">
+          <div class="weekly-col-header">
+            <div class="weekly-col-dayname ${day.isToday ? "today-text" : ""}">${day.dayName}曜日</div>
+            <div class="weekly-col-date ${day.isToday ? "today-text" : ""}">${day.date.getMonth() + 1}/${day.date.getDate()}</div>
+            ${totalHours > 0 ? `<div style="font-size:0.68rem; color:var(--text-muted); font-weight:700; margin-top:2px;">⏱ ${totalHours}h</div>` : ""}
+          </div>
+      `;
+
+      // 3時間ごとの横ガイドライン
+      hoursMark.forEach(h => {
+        const topPct = (h / 24) * 100;
+        html += `<div class="weekly-hour-line ${h % 6 === 0 ? "major" : ""}" style="top:${topPct}%;"></div>`;
+      });
+
+      // イベントブロックの配置
+      day.logs.forEach(log => {
+        const cat = this.categories.find(c => c.id === log.categoryId) || { color: "#8b5cf6", icon: "📝" };
+        const timeParts = (log.startTime || "12:00").split(":");
+        const startH = parseInt(timeParts[0], 10) || 0;
+        const startM = parseInt(timeParts[1], 10) || 0;
+        const startTotalMin = startH * 60 + startM;
+        const duration = log.durationMinutes || 30;
+
+        const topPercent = (startTotalMin / 1440) * 100;
+        const heightPercent = Math.max(3.2, (duration / 1440) * 100);
+
+        const bgColor = cat.color + "33"; // 20% opacity
+        const borderColor = cat.color;
+
+        html += `
+          <div class="timeline-event-block" 
+               style="top:${topPercent}%; height:${heightPercent}%; background:${bgColor}; border-color:${borderColor};"
+               onclick="app.showEventDetails('${log.id}')"
+               title="${log.title}\n時間: ${log.startTime} 〜 ${log.endTime} (${duration}分)\n成長: +${log.growthPoints}pt / 幸福: +${log.happinessPoints}pt">
+            <div class="timeline-block-time" style="color:${cat.color};">${log.startTime} - ${log.endTime}</div>
+            <div class="timeline-block-title">${cat.icon} ${log.title}</div>
+            ${heightPercent >= 5.5 ? `
+              <div class="timeline-block-pts">
+                <span>🚀+${log.growthPoints}</span> <span>✨+${log.happinessPoints}</span>
+              </div>
+            ` : ""}
+          </div>
+        `;
+      });
+
+      html += `</div>`;
+    });
+
+    grid.innerHTML = html;
+  }
+
+  showEventDetails(logId) {
+    const log = this.logs.find(l => l.id === logId);
+    if (!log) return;
+    const cat = this.categories.find(c => c.id === log.categoryId) || { icon: "📝" };
+
+    const detailMsg = `【${cat.icon} ${log.title}】\n` +
+      `📅 実施日: ${log.date || "日付未設定"}\n` +
+      `⏱ 時間帯: ${log.startTime} 〜 ${log.endTime} (${log.durationMinutes}分)\n` +
+      `💰 費用: ¥${(log.cost || 0).toLocaleString()}\n` +
+      `🚀 成長: +${log.growthPoints} pt / ✨ 幸福: +${log.happinessPoints} pt\n` +
+      (log.note ? `💭 メモ: ${log.note}` : "");
+
+    alert(detailMsg);
   }
 
   renderLogsList(filteredLogs) {
@@ -751,9 +940,8 @@ class LifeRoiApp {
 
     container.innerHTML = filteredLogs.slice(0, 20).map(log => {
       const cat = this.categories.find(c => c.id === log.categoryId) || { icon: "📝", color: "#8b5cf6" };
-      const d = new Date(log.timestamp);
-      const dateFormatted = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
       const stars = "★".repeat(log.rating || 3);
+      const timeRangeStr = (log.startTime && log.endTime) ? `${log.startTime} 〜 ${log.endTime}` : "";
 
       return `
         <div class="log-item">
@@ -762,9 +950,9 @@ class LifeRoiApp {
             <div class="log-details">
               <h4>${log.title} <span style="font-size:0.75rem; color:#f59e0b; margin-left:6px;">${stars}</span></h4>
               <div class="log-meta">
-                <span>⏱ ${log.durationMinutes}分</span>
+                <span>📅 ${log.date || log.timestamp.slice(0, 10)}</span>
+                ${timeRangeStr ? `<span style="font-weight:700; color:var(--text-main);">⏱ ${timeRangeStr} (${log.durationMinutes}分)</span>` : `<span>⏱ ${log.durationMinutes}分</span>`}
                 <span>💰 ¥${(log.cost || 0).toLocaleString()}</span>
-                <span>📅 ${dateFormatted}</span>
                 ${log.note ? `<span style="color:#cbd5e1;">💭 ${log.note}</span>` : ""}
               </div>
             </div>
@@ -956,7 +1144,44 @@ class LifeRoiApp {
     const logCat = document.getElementById("logCategorySelect");
     const logMin = document.getElementById("logMinutesInput");
     if (logCat) logCat.addEventListener("change", () => this.recalculateModalPoints());
-    if (logMin) logMin.addEventListener("input", () => this.recalculateModalPoints());
+
+    // モーダル内 時刻・所要時間の自動連動
+    const startTimeInput = document.getElementById("logStartTimeInput");
+    const endTimeInput = document.getElementById("logEndTimeInput");
+    const pad = (n) => String(n).padStart(2, "0");
+
+    const updateMinutesFromTimes = () => {
+      if (!startTimeInput || !endTimeInput || !logMin) return;
+      const [sh, sm] = (startTimeInput.value || "").split(":").map(Number);
+      const [eh, em] = (endTimeInput.value || "").split(":").map(Number);
+      if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return;
+
+      let startMin = sh * 60 + sm;
+      let endMin = eh * 60 + em;
+      if (endMin < startMin) {
+        endMin += 1440; // 日跨ぎ対応
+      }
+      const diff = Math.max(1, endMin - startMin);
+      logMin.value = diff;
+      this.recalculateModalPoints();
+    };
+
+    const updateEndTimeFromMinutes = () => {
+      if (!startTimeInput || !endTimeInput || !logMin) return;
+      const [sh, sm] = (startTimeInput.value || "").split(":").map(Number);
+      const duration = parseInt(logMin.value, 10) || 0;
+      if (isNaN(sh) || isNaN(sm) || duration <= 0) return;
+
+      const endTotalMin = (sh * 60 + sm + duration) % 1440;
+      const eh = Math.floor(endTotalMin / 60);
+      const em = endTotalMin % 60;
+      endTimeInput.value = `${pad(eh)}:${pad(em)}`;
+      this.recalculateModalPoints();
+    };
+
+    if (startTimeInput) startTimeInput.addEventListener("change", updateMinutesFromTimes);
+    if (endTimeInput) endTimeInput.addEventListener("change", updateMinutesFromTimes);
+    if (logMin) logMin.addEventListener("input", updateEndTimeFromMinutes);
   }
 
 

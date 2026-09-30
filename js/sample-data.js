@@ -99,10 +99,17 @@ function generateSampleLogs() {
   const now = new Date();
   const logs = [];
 
-  const helper = (dayOffset, hour, categoryId, minutes, cost, rating, note) => {
+  const helper = (dayOffset, startHour, categoryId, minutes, cost, rating, note) => {
     const d = new Date(now);
     d.setDate(d.getDate() - dayOffset);
-    d.setHours(hour, 15, 0, 0);
+    d.setHours(startHour, 0, 0, 0);
+
+    const endD = new Date(d.getTime() + minutes * 60000);
+
+    const pad = (n) => String(n).padStart(2, "0");
+    const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const startTimeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const endTimeStr = `${pad(endD.getHours())}:${pad(endD.getMinutes())}`;
 
     const cat = DEFAULT_CATEGORIES.find(c => c.id === categoryId);
     const multiplier = RATING_MULTIPLIERS[rating] || 1.0;
@@ -114,6 +121,9 @@ function generateSampleLogs() {
       id: "log_" + d.getTime() + "_" + Math.random().toString(36).substring(2, 7),
       categoryId,
       title: cat.name,
+      date: dateStr,
+      startTime: startTimeStr,
+      endTime: endTimeStr,
       durationMinutes: minutes,
       cost,
       rating,
