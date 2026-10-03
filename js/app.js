@@ -779,6 +779,80 @@ class LifeRoiApp {
     this.renderLogsList(filteredLogs);
   }
 
+  // クイック時間計測カード描画
+  renderActivityCards() {
+    const grid = document.getElementById("activityGrid");
+    if (!grid) return;
+
+    grid.innerHTML = this.categories.map(cat => {
+      const isActive = Boolean(this.activeTimer && this.activeTimer.categoryId === cat.id);
+      const isPaused = Boolean(isActive && this.activeTimer.isPaused);
+
+      let btnLabel = "▶ 計測開始";
+      if (isActive) {
+        btnLabel = isPaused ? "⏸ 一時停止中" : "⏱ 計測中...";
+      }
+
+      return `
+        <div class="activity-card ${isActive ? 'is-active' : ''}" 
+             style="--cat-color: ${cat.color};" 
+             onclick="app.startTimer('${cat.id}')">
+          <div class="activity-top">
+            <div class="activity-icon-wrap">${cat.icon}</div>
+            <div class="activity-quick-btn">
+              ${btnLabel}
+            </div>
+          </div>
+          <div class="activity-title">${cat.name}</div>
+          <div class="activity-desc">${cat.description || ''}</div>
+          <div class="activity-rates">
+            <span class="rate-badge rate-growth">🚀 成長 +${cat.growthRate}pt/h</span>
+            <span class="rate-badge rate-happiness">✨ 幸福 +${cat.happinessRate}pt/h</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  // 分析ダッシュボード グラフ描画
+  renderCharts(filteredLogs) {
+    if (!this.chartManager || typeof Chart === "undefined") return;
+
+    try {
+      // 1. 4象限 ROI マトリクス
+      this.chartManager.renderMatrixChart(
+        "matrixChart",
+        this.categories,
+        filteredLogs,
+        this.matrixXAxis,
+        this.matrixYAxis
+      );
+
+      // 2. 日別推移グラフ (期間に応じて日数調整)
+      let days = 7;
+      if (this.currentPeriod === "today") {
+        days = 1;
+      } else if (this.currentPeriod === "7d") {
+        days = 7;
+      } else if (this.currentPeriod === "30d") {
+        days = 30;
+      } else if (this.currentPeriod === "all") {
+        days = 30;
+      }
+      this.chartManager.renderTimelineChart("timelineChart", filteredLogs, days);
+
+      // 3. カテゴリ別内訳 (ドーナツ)
+      const distSelect = document.getElementById("distributionModeSelect");
+      const distMode = distSelect ? distSelect.value : "time";
+      this.chartManager.renderDistributionChart("distributionChart", this.categories, filteredLogs, distMode);
+
+      // 4. ROI時間効率ランキング
+      this.chartManager.renderEfficiencyChart("efficiencyChart", this.categories, filteredLogs);
+    } catch (err) {
+      console.error("グラフ描画エラー:", err);
+    }
+  }
+
   // 週間24時間アクティビティ タイムテーブル描画
   navigateWeek(delta) {
     if (delta === 0) {
